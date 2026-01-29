@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 #
 # SPDX-FileCopyrightText: 2022 Mike Dunston (atanisoft)
 #
@@ -306,8 +307,9 @@ def identity_used_packages_and_parts(board, ignore_top, ignore_bottom, use_value
                     part_id = package_name
                 if not part_id:
                     if use_field_for_part_id is not None:
-                        part_id = footprint.GetFieldText(use_field_for_part_id)
-                        if part_id is None:
+                        try:
+                            part_id = footprint.GetFieldText(use_field_for_part_id)
+                        except:
                             print('WARNING:\'{}\' \'{}\' does not have a value text, using \'{}\' as part-id!'.format(footprint.GetReference(), use_field_for_part_id, part_name))
                             part_id = part_name
                     else:
