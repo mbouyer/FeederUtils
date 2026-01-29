@@ -130,7 +130,7 @@ def update_parts_xml(parts, parts_xml_file, is_read_only, backup_location, packa
             #print('Part {} / {} height {}'.format(part, package, package_heights[package] if package in package_heights else '0.0'))
             ET.SubElement(parts_root, 'part', {
                 'id' : part,
-                'name' : part,
+                'name' : parts[part]['name'],
                 'height-units' : 'Millimeters',
                 'height' : package_heights[package] if package in package_heights else '0.0',
                 'package-id' : package,
@@ -241,7 +241,7 @@ def update_packages_xml(packages, packages_xml_file, usable_nozzles, is_read_onl
     else:
         print('All packages have been found, no update of {} required'.format(packages_xml_file))
 
-def identity_used_packages_and_parts(board, ignore_top, ignore_bottom, use_value_for_part_id, use_mixedcase, rotation, include_testpoints, discard_duplicate_pads):
+def identity_used_packages_and_parts(board, ignore_top, ignore_bottom, use_value_for_part_id, use_field_for_part_id, use_mixedcase, rotation, include_testpoints, discard_duplicate_pads):
     packages = {}
     parts = {}
     placements = []
@@ -287,35 +287,52 @@ def identity_used_packages_and_parts(board, ignore_top, ignore_bottom, use_value
             #   <error-handling>Alert</error-handling>
             # </placement>
             placement_type = 'Placement' if 'Fiducial' not in fp_value else 'Fiducial'
-            part_name = '{}_{}'.format(package_name, fp_value) if 'Fiducial' not in fp_value else package_name
+            if  'Fiducial' in fp_value:
+                part_name = package_name
+                part_id = package_name
+            else:
+                part_name = '{}_{}'.format(package_name, fp_value) if 'Fiducial' not in fp_value else package_name
+                part_id = None
 
-            if fp_value == '~':
-                print('WARNING:\'{}\' does not have a value text, using \'{}\' as part-id!'.format(footprint.GetReference(), package_name))
-                part_name = package_name
-            elif use_value_for_part_id:
-                part_name = fp_value
-            elif str(footprint.GetFPID().GetLibItemName()).upper() in package_as_part_id:
-                print('Overriding part-id of {} to {}'.format(footprint.GetReference(), package_name))
-                part_name = package_name
+                if fp_value == '~':
+                    print('WARNING:\'{}\' does not have a value text, using \'{}\' as part-name!'.format(footprint.GetReference(), package_name))
+                    part_name = package_name
+                elif use_value_for_part_id:
+                    part_name = fp_value
+                    part_id = fp_value
+                elif str(footprint.GetFPID().GetLibItemName()).upper() in package_as_part_id:
+                    print('Overriding part-id of {} to {}'.format(footprint.GetReference(), package_name))
+                    part_name = package_name
+                    part_id = package_name
+                if not part_id:
+                    if use_field_for_part_id is not None:
+                        part_id = footprint.GetFieldText(use_field_for_part_id)
+                        if part_id is None:
+                            print('WARNING:\'{}\' \'{}\' does not have a value text, using \'{}\' as part-id!'.format(footprint.GetReference(), use_field_for_part_id, part_name))
+                            part_id = part_name
+                    else:
+                        part_id = part_name
 
             if not use_mixedcase:
                 part_name = part_name.upper()
+                part_id = part_id.upper()
                 package_name = package_name.upper()
             
-            if part_name not in parts:
-                parts[part_name] = {
+            if part_id not in parts:
+                parts[part_id] = {
+                    'name': part_name,
                     'package': package_name,
                     'count' : 1,
                     'refs' : [ footprint.GetReference() ]
                 }
             else:
-                parts[part_name]['count'] += 1
-                parts[part_name]['refs'].append(footprint.GetReference())
-            parts[part_name]['refs'].sort()
+                parts[part_id]['count'] += 1
+                parts[part_id]['refs'].append(footprint.GetReference())
+            parts[part_id]['refs'].sort()
 
             placements.append({'id' : footprint.GetReference(),
                 'side' : 'Top' if footprint.GetLayer() == pcbnew.F_Cu else 'Bottom',
-                'part-id' : part_name,
+                'part-id' : part_id,
                 'type' : placement_type,
                 'x' : to_millimeters(footprint.GetPosition().x),
                 'y' : to_millimeters(footprint.GetPosition().y),
@@ -412,6 +429,7 @@ parser.add_argument('--openpnp_config', type=str, help='Location of OpenPnP Conf
 parser.add_argument('--no_backup', help='Enabling this option will disable creation of backup copies of packages.xml and parts.xml', default=False)
 parser.add_argument('--use_mixedcase', help='Enabling this option will generate package names and part names using the values as-is from the PCB. When not enabled all names will be forced to upper case.', default=False, action='store_true')
 parser.add_argument('--use_value_for_part_id', help='Enabling this option will use component Value from the KiCad PCB footprint as the OpenPnP part ID', default=False, action='store_true')
+parser.add_argument('--use_field_for_part_id', type=str, help='Enabling this option will use the specified component field from the KiCad PCB footprint as the OpenPnP part ID')
 parser.add_argument('--nozzle', type=str, help='Default nozzle(s) to assign as compatible, can be specified more than once', action='append')
 parser.add_argument('--ignore_top', help='Exclude pads on the F_Cu (top) layer', default=False, action='store_true')
 parser.add_argument('--ignore_bottom', help='Exclude pads on the B_Cu (bottom) layer', default=False, action='store_true')
@@ -490,7 +508,7 @@ if not args.read_only and not args.no_backup:
 packages_xml = '{}/packages.xml'.format(args.openpnp_config)
 parts_xml = '{}/parts.xml'.format(args.openpnp_config)
 
-packages, parts, placements = identity_used_packages_and_parts(board, args.ignore_top, args.ignore_bottom, args.use_value_for_part_id, args.use_mixedcase, int(args.rotation), args.include_testpoints, args.discard_duplicate_pads)
+packages, parts, placements = identity_used_packages_and_parts(board, args.ignore_top, args.ignore_bottom, args.use_value_for_part_id, args.use_field_for_part_id, args.use_mixedcase, int(args.rotation), args.include_testpoints, args.discard_duplicate_pads)
 update_packages_xml(packages, packages_xml, args.nozzle, args.read_only, backup_location)
 update_parts_xml(parts, parts_xml, args.read_only, backup_location, part_height_mapping)
 create_board_xml(placements, board_origin_x, board_origin_y, board_width, board_height, args.board, args.board_xml, args.rounding, int(args.rotation))
